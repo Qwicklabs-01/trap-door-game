@@ -1447,6 +1447,11 @@ const W = canvas.width, H = canvas.height;
 const GROUND_Y = 400;
 const TOTAL_LEVELS = 100;
 
+const rawNow = ()=>performance.now();
+let pausedTotal = 0;
+let pauseStartedAt = null;
+const now = ()=> (pauseStartedAt!==null ? pauseStartedAt : rawNow()) - pausedTotal;
+
 // ============================================================
 // PLAYER NAME & PROGRESS
 // ============================================================
