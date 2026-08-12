@@ -1,13 +1,24 @@
 {
+  "id": "com.sakshi.trapdoor",
   "name": "Trap Door - 100 Levels",
   "short_name": "Trap Door",
   "description": "A 100-level troll platformer. Wall-jump, slide-dash, and outrun a level that actively cheats.",
+  "categories": ["game", "platformer", "casual"],
+  "lang": "en",
+  "dir": "ltr",
   "start_url": "./index.html",
   "display": "fullscreen",
+  "display_override": ["window-controls-overlay", "standalone", "fullscreen"],
   "background_color": "#06040d",
   "theme_color": "#06040d",
   "orientation": "landscape",
   "icons": [
+    {
+      "src": "./icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
     {
       "src": "./icon-512x512.png",
       "sizes": "512x512",
