@@ -257,11 +257,14 @@
   @media (prefers-reduced-motion: reduce) { #msg { transition: opacity 0.01s; } }
 
   /* ============================================================
-     SKIP BUTTON
+     HELP ACTIONS
   ============================================================ */
-  #skipBtn {
+  #helpActions {
     position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
-    display: none; align-items: center; gap: 8px;
+    display: none; align-items: center; gap: 10px; z-index: 7;
+  }
+  #helpActions button {
+    display: flex; align-items: center; gap: 8px;
     background: var(--bg-glass);
     border: 1px solid var(--neon-purple);
     border-radius: var(--radius-pill);
@@ -270,13 +273,15 @@
     font-size: 11px; font-weight: 600;
     letter-spacing: 1.5px;
     text-transform: uppercase;
-    z-index: 7;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     transition: all 0.2s ease;
     box-shadow: var(--shadow-glow-purple);
   }
-  #skipBtn:hover { background: rgba(192,132,252,0.15); }
+  #helpActions button:hover { background: rgba(192,132,252,0.15); }
+  #slowBtn { border-color: var(--neon-cyan); color: var(--neon-cyan); box-shadow: 0 0 30px rgba(34,211,238,0.3); }
+  #slowBtn.active { background: rgba(34,211,238,0.2); }
+  #slowBtn:hover { background: rgba(34,211,238,0.15); }
 
   /* ============================================================
      OVERLAYS
@@ -865,7 +870,7 @@
     /* Level grid tighter */
     .lvlbtn { font-size: 10px; padding: 8px 2px; }
     /* Skip button above controls bar */
-    #skipBtn { bottom: calc(108px + 8px); }
+    #helpActions { bottom: calc(108px + 8px); }
     /* Msg toast */
     #msg { top: 10%; font-size: 10px; max-width: calc(100% - 24px); }
   }
@@ -939,7 +944,7 @@
     #lvlgrid { max-width: 560px; grid-template-columns: repeat(5,1fr); }
     .certificate { max-width: 560px; }
     /* Skip button position */
-    #skipBtn { bottom: calc(140px + 10px); }
+    #helpActions { bottom: calc(140px + 10px); }
   }
 
   /* ============================================================
@@ -967,7 +972,7 @@
     .share-modal-inner { padding: 16px; gap: 12px; }
     .share-btn { padding: 8px 14px; font-size: 10px; }
     .credit-sig { font-size: 9px; padding: 4px 10px; }
-    #skipBtn { font-size: 10px; padding: 6px 14px; }
+    #helpActions button { font-size: 10px; padding: 6px 14px; }
   }
 
   /* ============================================================
@@ -1289,7 +1294,10 @@
     </div>
 
     <div id="msg"><span class="ico">⚠</span><span id="msgtext"></span></div>
-    <button id="skipBtn" aria-label="Skip this level"><span>⏭</span> Skip Level</button>
+    <div id="helpActions">
+      <button id="slowBtn" aria-label="Slow Motion Mode"><span>⏱</span> Slow Mo</button>
+      <button id="skipBtn" aria-label="Skip this level"><span>⏭</span> Skip Level</button>
+    </div>
 
     <!-- TITLE SCREEN -->
     <div id="title-screen" class="overlay">
@@ -1914,21 +1922,37 @@ function buildSegment(type, x, diff, rnd){
 
 function genLevel(n){
   const rnd = seededRandom(n*104729 + 17);
-  const diff = Math.min(1, (n-1)/(TOTAL_LEVELS-1));
+  let diff = Math.min(1, (n-1)/(TOTAL_LEVELS-1));
   const world = Math.min(WORLDS.length-1, Math.floor((n-1)/20));
+  
+  if (n <= 4) {
+    diff = 0; // Extremely easy parameters
+  } else {
+    // Curve the difficulty to be stronger faster
+    diff = Math.min(1, Math.pow(diff, 0.75) + 0.1);
+  }
 
   const platforms = [], hazards = [], zones = [], keysDef = [];
   const startW = Math.max(120, 180 - diff*45);
   platforms.push({x:0, y:400, w:startW, h:50, type:'solid'});
   let x = startW;
 
-  const repertoire = ['gap','spike','slidegap'];
+  let repertoire = ['gap','spike','slidegap'];
   if(world >= 1) repertoire.push('reverse','collapse','wallclimb');
   if(world >= 2) repertoire.push('jumpboost','fakefloor');
   if(world >= 4) repertoire.push('combo');
   else if(world === 3 && rnd() < 0.4) repertoire.push('combo');
+  
+  if (n <= 4) {
+    repertoire = ['gap']; // Only simple gaps for the first 4 levels
+  }
 
-  const segCount = 4 + Math.floor(diff*11) + Math.floor(rnd()*3);
+  let segCount = 4 + Math.floor(diff*11) + Math.floor(rnd()*3);
+  if (n <= 4) {
+    segCount = n <= 2 ? 2 : 3; // Very short for first 4 levels
+  } else {
+    segCount += 2; // Extra length for stronger difficulty
+  }
   const wantsKey = (n % 10 === 5);
   let keyPlaced = false;
 
@@ -1996,6 +2020,10 @@ let consecutiveDeaths = 0;
 let camX = 0;
 let inputs = {left:false,right:false,jump:false,jumpHeld:false};
 let msgTimer = 0;
+let shakeT = 0;
+let particles = [];
+let slowMo = false;
+let slowMoFrame = false;
 
 const GRAVITY = 0.62;
 const MOVE_ACC = 0.62;
@@ -2040,7 +2068,11 @@ function resetLevel(idx){
   const posInWorld = level.num - WORLDS[wIdx].range[0] + 1;
   document.getElementById('lvlname').textContent = `${level.num} — ${level.name}`;
   document.getElementById('worldprog').textContent = `W${wIdx+1} · ${posInWorld}/20`;
-  document.getElementById('skipBtn').style.display='none';
+  document.getElementById('helpActions').style.display='none';
+  slowMo = false;
+  document.getElementById('slowBtn').classList.remove('active');
+  shakeT = 0;
+  particles = [];
   showMsg(level.msg, 1700);
 }
 
@@ -2102,6 +2134,40 @@ bindTouch('slidebtn','slide');
 
 // ---------- Physics / collision ----------
 function activePlatforms(){ return platformState.filter(p=>p.active); }
+
+function spawnParticles(x, y, color, count, speed) {
+  for(let i=0; i<count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const s = Math.random() * speed;
+    particles.push({
+      x: x, y: y,
+      vx: Math.cos(angle)*s, vy: Math.sin(angle)*s,
+      life: 1.0, color: color,
+      decay: 0.02 + Math.random()*0.04,
+      size: 2 + Math.random()*4
+    });
+  }
+}
+function updateAndDrawParticles() {
+  for(let i=particles.length-1; i>=0; i--) {
+    let p = particles[i];
+    if(!slowMo || !slowMoFrame) {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life -= p.decay;
+    }
+    if(p.life <= 0) {
+      particles.splice(i,1);
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = p.life;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1.0;
+}
 
 function moveAndCollide(){
   const plats = activePlatforms();
@@ -2166,6 +2232,7 @@ function moveAndCollide(){
     player.wallJumpLockUntil = t + WALL_JUMP_LOCK_MS;
     player.jumpQueuedAt = -9999;
     player.stretchT = 1;
+    spawnParticles(player.x + (player.wallSide>0?player.w:0), player.y+PLAYER_H/2, '#ffc040', 8, 3);
   } else if(wantsJump && (player.onGround || canCoyote)){
     let mult = 1;
     for(const z of level.zones){ if(z.type==='jumpboost' && rectsOverlap(player,z)) mult = Math.max(mult, z.mult); }
@@ -2174,6 +2241,7 @@ function moveAndCollide(){
     player.jumpQueuedAt = -9999;
     player.lastGroundTime = -9999;
     player.stretchT = 1;
+    spawnParticles(player.x+PLAYER_W/2, player.y+PLAYER_H, '#e8e0f0', 8, 2);
   }
   if(!inputs.jumpHeld && player.vy < -3){ player.vy = -3; }
 
@@ -2192,6 +2260,7 @@ function moveAndCollide(){
         player.vy = 0;
         player.onGround = true;
         player.lastGroundTime = t;
+        if(!player.wasOnGround) spawnParticles(player.x+PLAYER_W/2, p.y, '#a094c0', 10, 2);
         if(p.type==='collapse' && p.touchedAt===null){ p.touchedAt = t; }
       } else if(player.vy<0){
         player.y = p.y + p.h;
@@ -2267,8 +2336,8 @@ function startDeathReset(manual){
   document.getElementById('deaths').textContent = deaths;
   resetLevel(curLevelIdx);
   if(!manual) showMsg(pickTaunt(), 900);
-  if(consecutiveDeaths >= 8 && !level.final){
-    document.getElementById('skipBtn').style.display = 'flex';
+  if(consecutiveDeaths >= 3 && !level.final){
+    document.getElementById('helpActions').style.display = 'flex';
   }
 }
 
@@ -2279,7 +2348,7 @@ function pickTaunt(){ return TAUNTS[Math.floor(Math.random()*TAUNTS.length)]; }
 function completeLevel(){
   if(!save.completed.includes(level.id)){ save.completed.push(level.id); saveSave(save); }
   consecutiveDeaths = 0;
-  document.getElementById('skipBtn').style.display='none';
+  document.getElementById('helpActions').style.display='none';
   if(level.final){ goWin(); return; }
   const next = curLevelIdx+1;
   if(next < LEVELS.length){ resetLevel(next); showMsg('door opened.', 1000); }
@@ -2288,13 +2357,20 @@ function completeLevel(){
 
 function skipLevel(){
   consecutiveDeaths = 0;
-  document.getElementById('skipBtn').style.display='none';
+  document.getElementById('helpActions').style.display='none';
   if(!save.completed.includes(level.id)){ save.completed.push(level.id); saveSave(save); }
   const next = curLevelIdx+1;
   if(next < LEVELS.length){ resetLevel(next); showMsg('level skipped.', 1000); }
   else { goWin(); }
 }
 document.getElementById('skipBtn').onclick = skipLevel;
+
+document.getElementById('slowBtn').onclick = ()=>{
+  slowMo = !slowMo;
+  const btn = document.getElementById('slowBtn');
+  if(slowMo) btn.classList.add('active');
+  else btn.classList.remove('active');
+};
 
 function goWin(){
   state = 'won-game';
@@ -2347,7 +2423,14 @@ function draw(){
   ctx.fillRect(0,0,W,H);
 
   ctx.save();
-  ctx.translate(-camX,0);
+  let sx = 0, sy = 0;
+  if(shakeT > 0) {
+    sx = (Math.random()-0.5) * shakeT * 10;
+    sy = (Math.random()-0.5) * shakeT * 10;
+    shakeT *= 0.85;
+    if(shakeT < 0.1) shakeT = 0;
+  }
+  ctx.translate(-camX + sx, sy);
 
   // Subtle grid lines in background
   ctx.strokeStyle = 'rgba(100,70,160,0.04)';
@@ -2467,6 +2550,7 @@ function draw(){
   ctx.fill();
 
   drawPlayer();
+  updateAndDrawParticles();
 
   ctx.restore();
 
@@ -2664,9 +2748,13 @@ function loop(){
   slideWasHeld = inputs.slideHeld;
 
   if(state==='playing'){
-    const result = moveAndCollide();
-    const target = Math.max(0, Math.min(level.width - W, player.x - W/2));
-    camX += (target-camX)*0.18;
+    if(slowMo) { slowMoFrame = !slowMoFrame; } else { slowMoFrame = false; }
+    let result = 'ok';
+    if(!slowMo || !slowMoFrame) {
+      result = moveAndCollide();
+      const target = Math.max(0, Math.min(level.width - W, player.x - W/2));
+      camX += (target-camX)*0.18;
+    }
     if(result==='dead'){ state='dead-flash'; flashDeath(); }
     else if(result==='win'){ state='won-level'; completeLevel(); state='playing'; }
     draw();
@@ -2676,6 +2764,8 @@ function loop(){
 }
 
 function flashDeath(){
+  shakeT = 1.0;
+  spawnParticles(player.x+player.w/2, player.y+player.h/2, '#ff3b30', 40, 6);
   const stage = document.getElementById('stage');
   stage.style.filter = 'brightness(2.5) saturate(0)';
   setTimeout(()=>{ stage.style.filter=''; startDeathReset(false); state='playing'; }, 80);
